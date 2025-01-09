@@ -1,8 +1,24 @@
 #!/bin/bash
 set -exuo pipefail
 
-WORKDIR="$(pwd)/workdir"
-mkdir -p ${WORKDIR}
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+WORKDIR="/Volumes/tempdisk"
+#mkdir -p ${WORKDIR}
+
+echo '♻️ ' Create Ramdisk
+
+if df | grep Ramdisk > /dev/null ; then tput bold ; echo ; echo ⏏ Eject Ramdisk ; tput sgr0 ; fi
+
+if df | grep Ramdisk > /dev/null ; then diskutil eject Ramdisk ; sleep 1 ; fi
+
+DISK_ID=$(hdid -nomount ram://70000000)
+
+newfs_hfs -v tempdisk ${DISK_ID}
+
+diskutil mount ${DISK_ID}
+
+sleep 1
 
 SRC="$WORKDIR/sw"
 CMPLD="$WORKDIR/compile"
@@ -25,8 +41,10 @@ else
   export ARCH=x86_64
 fi
 
-export LDFLAGS=${LDFLAGS:-}
-export CFLAGS=${CFLAGS:-}
+export LDFLAGS="${LDFLAGS:-} -w -fpermissive -Wno-int-conversion -Wno-incompatible-function-pointer-types"
+export CFLAGS="${CFLAGS:-} -w -fpermissive -Wno-int-conversion -Wno-incompatible-function-pointer-types"
+export CXXFLAGS="${CXXFLAGS:-} -w -fpermissive -Wno-int-conversion -Wno-incompatible-function-pointer-types"
+export CPPFLAGS="${CPPFLAGS:-} -w -fpermissive -Wno-int-conversion -Wno-incompatible-function-pointer-types"
 
 function ensure_package () {
   if [[ "$ARCH" == "arm64" ]]; then
@@ -49,33 +67,33 @@ function ensure_package () {
   fi
 }
 
-ensure_package pkgconfig
-ensure_package libtool
+#ensure_package pkgconfig
+#ensure_package libtool
 ensure_package glib
 
-if ! command -v autoreconf &> /dev/null; then
-  brew install autoconf
-fi
+#if ! command -v autoreconf &> /dev/null; then
+#  brew install autoconf
+#fi
 if ! command -v automake &> /dev/null; then
   brew install automake
 fi
-if ! command -v cmake &> /dev/null; then
-  brew install cmake
-fi
+#if ! command -v cmake &> /dev/null; then
+#  brew install cmake
+#fi
 
 echo "Cloning required git repositories"
 git clone --depth 1 -b master https://code.videolan.org/videolan/x264.git $CMPLD/x264 &
 git clone --depth 1 -b origin https://github.com/rbrito/lame.git $CMPLD/lame &
 git clone --depth 1 -b main https://github.com/webmproject/libvpx $CMPLD/libvpx &
-git clone --depth 1 -b master https://github.com/FFmpeg/FFmpeg $CMPLD/ffmpeg &
+curl https://ffmpeg.org/releases/ffmpeg-snapshot.tar.bz2 -fSL --progress-bar | tar -xjC $CMPLD/ &
 git clone --depth 1 -b v2.0.1 https://aomedia.googlesource.com/aom.git $CMPLD/aom &
 wait
 
 curl -Ls -o - https://bitbucket.org/multicoreware/x265_git/downloads/x265_3.3.tar.gz | tar zxf - -C $CMPLD/ &
-# statically linking glibc is discouraged
-# echo "Downloading: glib (2.66.2)"
-# curl -Ls -o - https://download.gnome.org/sources/glib/2.66/glib-2.66.2.tar.xz | tar Jxf - -C $CMPLD/
-# curl -o "$CMPLD/glib-2.66.2/hardcoded-patchs.diff" https://raw.githubusercontent.com/Homebrew/formula-patches/6164294a75541c278f3863b111791376caa3ad26/glib/hardcoded-paths.diff
+#statically linking glibc is discouraged
+echo "Downloading: glib (2.66.2)"
+curl -Ls -o - https://download.gnome.org/sources/glib/2.66/glib-2.66.2.tar.xz | tar Jxf - -C $CMPLD/
+curl -o "$CMPLD/glib-2.66.2/hardcoded-patchs.diff" https://raw.githubusercontent.com/Homebrew/formula-patches/6164294a75541c278f3863b111791376caa3ad26/glib/hardcoded-paths.diff
 echo "Downloading: fribidi (1.0.10)"
 {(curl -Ls -o - https://github.com/fribidi/fribidi/releases/download/v1.0.10/fribidi-1.0.10.tar.xz | tar Jxf - -C $CMPLD/) &};
 echo "Downloading: vid.stab (1.1.0)"
@@ -117,15 +135,18 @@ echo "Downloading: libogg (1.3.4)"
 curl -Ls -o - https://ftp.osuosl.org/pub/xiph/releases/ogg/libogg-1.3.4.tar.gz | tar zxf - -C $CMPLD/
 curl -s -o "$CMPLD/libogg-1.3.4/fix_unsigned_typedefs.patch" "https://github.com/xiph/ogg/commit/c8fca6b4a02d695b1ceea39b330d4406001c03ed.patch?full_index=1"
 
+echo "Downloading: cmake (3.31.3)"
+{(curl -Ls -o - https://github.com/Kitware/CMake/releases/download/v3.31.3/cmake-3.31.3.tar.gz | tar Jxf - -C $CMPLD/) &};
+
 wait
 
-function build_fribidi () {
-  if [[ ! -e "${SRC}/lib/pkgconfig/fribidi.pc" ]]; then
-    echo '♻️ ' Start compiling FRIBIDI
+function build_cmake() {
+  if [[ ! -e "${SRC}/bin/cmake" ]]; then
+    echo '♻️ ' Start compiling CMAKE
     cd ${CMPLD}
-    cd fribidi-1.0.10
-    ./configure --prefix=${SRC} --disable-debug --disable-dependency-tracking --disable-silent-rules --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    cd cmake-3.31.3
+    ./configure --prefix=${SRC}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -136,8 +157,35 @@ function build_yasm () {
     cd ${CMPLD}
     cd yasm-1.3.0
     ./configure --prefix=${SRC}
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
+  fi
+}
+
+function build_nasm () {
+  if [[ ! -e "${SRC}/bin/nasm" ]]; then
+    echo '♻️ ' Start compiling NASM
+    #
+    # compile NASM
+    #
+    cd ${CMPLD}
+    cd nasm-2.15.05
+    ./configure --prefix=${SRC}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
+    make install
+  fi
+}
+
+function build_pkgconfig () {
+  if [[ ! -e "${SRC}/bin/pkg-config" ]]; then
+    echo '♻️ ' Start compiling pkg-config
+    cd ${CMPLD}
+    cd pkg-config-0.29.2
+    export LDFLAGS="-framework Foundation -framework Cocoa"
+    ./configure --prefix=${SRC} --with-pc-path=${SRC}/lib/pkgconfig --with-internal-glib --disable-shared --enable-static
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
+    make install
+    unset LDFLAGS
   fi
 }
 
@@ -154,35 +202,8 @@ function build_aom () {
       AOM_CMAKE_PARAMS="$AOM_CMAKE_PARAMS -DCONFIG_RUNTIME_CPU_DETECT=0"
     fi
     cmake ${CMPLD}/aom $AOM_CMAKE_PARAMS
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
-  fi
-}
-
-function build_nasm () {
-  if [[ ! -e "${SRC}/bin/nasm" ]]; then
-    echo '♻️ ' Start compiling NASM
-    #
-    # compile NASM
-    #
-    cd ${CMPLD}
-    cd nasm-2.15.05
-    ./configure --prefix=${SRC}
-    make -j ${NUM_PARALLEL_BUILDS}
-    make install
-  fi
-}
-
-function build_pkgconfig () {
-  if [[ ! -e "${SRC}/bin/pkg-config" ]]; then
-    echo '♻️ ' Start compiling pkg-config
-    cd ${CMPLD}
-    cd pkg-config-0.29.2
-    export LDFLAGS="-framework Foundation -framework Cocoa"
-    ./configure --prefix=${SRC} --with-pc-path=${SRC}/lib/pkgconfig --with-internal-glib --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
-    make install
-    unset LDFLAGS
   fi
 }
 
@@ -192,7 +213,7 @@ function build_zlib () {
     cd ${CMPLD}
     cd zlib-1.2.11
     ./configure --prefix=${SRC}
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
     rm ${SRC}/lib/libz.so* || true
     rm ${SRC}/lib/libz.* || true
@@ -204,7 +225,7 @@ function build_lame () {
     cd ${CMPLD}
     cd lame
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -215,7 +236,7 @@ function build_x264 () {
     cd ${CMPLD}
     cd x264
     ./configure --prefix=${SRC} --disable-shared --enable-static --enable-pic
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
     make install-lib-static
   fi
@@ -231,7 +252,7 @@ function build_x265 () {
     cd ${CMPLD}
     cd x265_3.3/source
     cmake -DCMAKE_INSTALL_PREFIX:PATH=${SRC} -DHIGH_BIT_DEPTH=ON -DMAIN12=ON -DENABLE_SHARED=NO -DEXPORT_C_API=NO -DENABLE_CLI=OFF .
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     mv libx265.a libx265_main12.a
     make clean-generated
     rm CMakeCache.txt
@@ -241,7 +262,7 @@ function build_x265 () {
     cd x265_3.3/source
     cmake -DCMAKE_INSTALL_PREFIX:PATH=${SRC} -DMAIN10=ON -DHIGH_BIT_DEPTH=ON -DENABLE_SHARED=NO -DEXPORT_C_API=NO -DENABLE_CLI=OFF .
     make clean
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     mv libx265.a libx265_main10.a
     make clean-generated && rm CMakeCache.txt
 
@@ -250,7 +271,7 @@ function build_x265 () {
     cd x265_3.3/source
     cmake -DCMAKE_INSTALL_PREFIX:PATH=${SRC} -DEXTRA_LIB="x265_main10.a;x265_main12.a" -DEXTRA_LINK_FLAGS=-L. -DLINKED_12BIT=ON -DLINKED_10BIT=ON -DENABLE_SHARED=OFF -DENABLE_CLI=OFF .
     make clean
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
 
     mv libx265.a libx265_main.a
     libtool -static -o libx265.a libx265_main.a libx265_main10.a libx265_main12.a 2>/dev/null
@@ -264,7 +285,7 @@ function build_vpx () {
     cd ${CMPLD}
     cd libvpx
     ./configure --prefix=${SRC} --enable-vp8 --enable-postproc --enable-vp9-postproc --enable-vp9-highbitdepth --disable-examples --disable-docs --enable-multi-res-encoding --disable-unit-tests --enable-pic --disable-shared
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -275,7 +296,7 @@ function build_expat () {
     cd ${CMPLD}
     cd expat-2.2.10
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -286,7 +307,7 @@ function build_libiconv () {
     cd ${CMPLD}
     cd libiconv-1.16
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -297,7 +318,18 @@ function build_enca () {
     cd ${CMPLD}
     cd enca-1.19
     ./configure --prefix=${SRC} --disable-dependency-tracking --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
+    make install
+  fi
+}
+
+function build_fribidi () {
+  if [[ ! -e "${SRC}/lib/pkgconfig/fribidi.pc" ]]; then
+    echo '♻️ ' Start compiling FRIBIDI
+    cd ${CMPLD}
+    cd fribidi-1.0.10
+    ./configure --prefix=${SRC} --disable-debug --disable-dependency-tracking --disable-silent-rules --disable-shared --enable-static
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -308,7 +340,7 @@ function build_freetype () {
     cd ${CMPLD}
     cd freetype-2.10.4
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -321,7 +353,7 @@ function build_gettext () {
     ./configure --prefix=${SRC} --disable-dependency-tracking --disable-silent-rules --disable-debug --disable-shared --enable-static \
                 --with-included-gettext --with-included-glib --with-includedlibcroco --with-included-libunistring --with-emacs \
                 --disable-java --disable-csharp --without-git --without-cvs --without-xz
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -332,7 +364,7 @@ function build_fontconfig () {
     cd ${CMPLD}
     cd fontconfig-2.13.93
     ./configure --prefix=${SRC} --enable-iconv --disable-libxml2 --disable-shared --enable-static --disable-docs
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -346,7 +378,7 @@ function build_harfbuzz () {
     sed -i -e 's/supp_size = 0;//g' ./src/hb-subset-cff1.cc
     sed -i -e 's/supp_size += SuppEncoding::static_size \* supp_codes.length;//g' ./src/hb-subset-cff1.cc
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -355,9 +387,9 @@ function build_ass () {
   if [[ ! -e "${SRC}/lib/pkgconfig/libass.pc" ]]; then
     cd ${CMPLD}
     cd libass-0.15.0
-    autoreconf -i
+    #autoreconf -i
     ./configure --prefix=${SRC} --disable-dependency-tracking --disable-shread --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -368,7 +400,7 @@ function build_opus () {
     cd ${CMPLD}
     cd opus-1.3.1
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -380,7 +412,7 @@ function build_ogg () {
     cd libogg-1.3.4
     patch -p1 < ./fix_unsigned_typedefs.patch
     ./configure --prefix=${SRC} --disable-shared --enable-static
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -391,7 +423,7 @@ function build_vorbis () {
     cd ${CMPLD}
     cd libvorbis-1.3.7
     ./configure --prefix=${SRC} --with-ogg-libraries=${SRC}/lib --with-ogg-includes=${SRC}/include/ --enable-static --disable-shared --build=x86_64
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -402,7 +434,7 @@ function build_theora () {
     cd ${CMPLD}
     cd libtheora-1.1.1
     ./configure --prefix=${SRC} --disable-asm --with-ogg-libraries=${SRC}/lib --with-ogg-includes=${SRC}/include/ --with-vorbis-libraries=${SRC}/lib --with-vorbis-includes=${SRC}/include/ --enable-static --disable-shared
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -414,7 +446,7 @@ function build_vidstab () {
     cd vid.stab-1.1.0
     patch -p1 < fix_cmake_quoting.patch
     cmake . -DCMAKE_INSTALL_PREFIX:PATH=${SRC} -DLIBTYPE=STATIC -DBUILD_SHARED_LIBS=OFF -DUSE_OMP=OFF -DENABLE_SHARED=off
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -425,7 +457,7 @@ function build_snappy () {
     cd ${CMPLD}
     cd snappy-1.1.8
     cmake . -DCMAKE_INSTALL_PREFIX:PATH=${SRC} -DLIBTYPE=STATIC -DENABLE_SHARED=off
-    make -j ${NUM_PARALLEL_BUILDS}
+    make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
   fi
 }
@@ -437,6 +469,7 @@ function build_ffmpeg () {
   export LDFLAGS="-L${SRC}/lib ${LDFLAGS:-}"
   export CFLAGS="-I${SRC}/include ${CFLAGS:-}"
   export LDFLAGS="$LDFLAGS -lexpat -lenca -lfribidi -liconv -lstdc++ -lfreetype -framework CoreText -framework VideoToolbox"
+  rm -rf "${SRC}/lib/*.dylib"
   ./configure --prefix=${SRC} --extra-cflags="-fno-stack-check" --arch=${ARCH} --cc=/usr/bin/clang \
               --enable-fontconfig --enable-gpl --enable-libopus --enable-libtheora --enable-libvorbis \
               --enable-libmp3lame --enable-libass --enable-libfreetype --enable-libx264 --enable-libx265 --enable-libvpx \
@@ -444,7 +477,7 @@ function build_ffmpeg () {
               --disable-ffplay --enable-postproc --enable-nonfree --enable-runtime-cpudetect
   echo "build start"
   start_time="$(date -u +%s)"
-  make -j ${NUM_PARALLEL_BUILDS}
+  make V=1 -j ${NUM_PARALLEL_BUILDS}
   end_time="$(date -u +%s)"
   elapsed="$(($end_time-$start_time))"
   make install
@@ -452,6 +485,7 @@ function build_ffmpeg () {
 }
 
 total_start_time="$(date -u +%s)"
+build_cmake
 build_fribidi
 build_yasm
 build_aom
