@@ -1,7 +1,7 @@
 #!/bin/bash
 set -exuo pipefail
 
-eval "$(/opt/homebrew/bin/brew shellenv)"
+#eval "$(/opt/homebrew/bin/brew shellenv)"
 
 WORKDIR="/Volumes/tempdisk"
 #mkdir -p ${WORKDIR}
