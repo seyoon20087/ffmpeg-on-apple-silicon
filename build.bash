@@ -1,7 +1,7 @@
 #!/bin/bash
 set -exuo pipefail
 
-#eval "$(/opt/homebrew/bin/brew shellenv)"
+eval "$(/opt/homebrew/bin/brew shellenv)"
 
 WORKDIR="/Volumes/tempdisk"
 #mkdir -p ${WORKDIR}
@@ -213,6 +213,23 @@ function build_zlib () {
     cd ${CMPLD}
     cd zlib-1.2.11
     ./configure --prefix=${SRC}
+    patch -fp01 <<EOF
+--- zutil_original.c	2025-04-15 22:19:33
++++ zutil.c	2025-04-15 22:19:39
+@@ -6,9 +6,9 @@
+ /* @(#) \$Id$ */
+ 
+ #include "zutil.h"
+-#ifndef Z_SOLO
++/*#ifndef Z_SOLO
+ #  include "gzguts.h"
+-#endif
++#endif*/
+ 
+ z_const char * const z_errmsg[10] = {
+     (z_const char *)"need dictionary",     /* Z_NEED_DICT       2  */
+
+EOF
     make V=1 -j ${NUM_PARALLEL_BUILDS}
     make install
     rm ${SRC}/lib/libz.so* || true
@@ -469,7 +486,7 @@ function build_ffmpeg () {
   export LDFLAGS="-L${SRC}/lib ${LDFLAGS:-}"
   export CFLAGS="-I${SRC}/include ${CFLAGS:-}"
   export LDFLAGS="$LDFLAGS -lexpat -lenca -lfribidi -liconv -lstdc++ -lfreetype -framework CoreText -framework VideoToolbox"
-  rm -rf "${SRC}/lib/*.dylib"
+  rm -rf ${SRC}/lib/*.dylib || true
   ./configure --prefix=${SRC} --extra-cflags="-fno-stack-check" --arch=${ARCH} --cc=/usr/bin/clang \
               --enable-fontconfig --enable-gpl --enable-libopus --enable-libtheora --enable-libvorbis \
               --enable-libmp3lame --enable-libass --enable-libfreetype --enable-libx264 --enable-libx265 --enable-libvpx \
