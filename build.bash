@@ -491,7 +491,7 @@ function build_ffmpeg () {
               --enable-fontconfig --enable-gpl --enable-libopus --enable-libtheora --enable-libvorbis \
               --enable-libmp3lame --enable-libass --enable-libfreetype --enable-libx264 --enable-libx265 --enable-libvpx \
               --enable-libaom --enable-libvidstab --enable-libsnappy --enable-version3 --pkg-config-flags=--static \
-              --disable-ffplay --enable-postproc --enable-nonfree --enable-runtime-cpudetect
+              --disable-ffplay --enable-nonfree --enable-runtime-cpudetect
   echo "build start"
   start_time="$(date -u +%s)"
   make V=1 -j ${NUM_PARALLEL_BUILDS}
